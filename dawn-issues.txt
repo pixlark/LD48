@@ -1,0 +1,10 @@
+ - PCHs on linux
+ - no way to tell if Texture::loadFromFile failed
+ - how to store reference to component on struct??
+ - no +=, -=, etc operators on Vec3
+ - no standard output for Vec3
+ - "Noramlize()"
+ - grabbing the window doesnt pause delta time which fucks up physics
+ - Vec3::zero and standard normals would be useful
+ - Vec distance function
+

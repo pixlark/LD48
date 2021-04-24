@@ -1,0 +1,7 @@
+Debug/
+Release/
+Game.sln
+Game.vcxproj
+Game.vcxproj.filters
+Game.vcxproj.user
+.vs/
