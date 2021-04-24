@@ -6,3 +6,4 @@ Game.vcxproj.filters
 Game.vcxproj.user
 .vs/
 Makefile
+game
