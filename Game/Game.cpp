@@ -1,20 +1,34 @@
 #include "Dawn/Dawn.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cmath>
 #include <functional>
+#include <iomanip>
 #include <iostream>
 #include <vector>
 
+static const float PI = 3.14159265;
+
 static const float PHYSICS_TIMESTEP = 1.0f / 120.0f;
 static const float BALL_SIZE = 0.1f;
+
+static float SqrMagnitude(Dawn::Vec3 vec) {
+    return vec.x * vec.x + vec.y * vec.y + vec.z * vec.z;
+}
+
+static float Magnitude(Dawn::Vec3 vec) {
+    return sqrt(vec.x * vec.x + vec.y * vec.y + vec.z * vec.z);
+}
 
 static Dawn::Vec3 Norm(Dawn::Vec3 vec) {
 	if (vec.x == 0 && vec.y == 0 && vec.z == 0) {
 		return Dawn::Vec3(0, 0, 0);
 	}
-	return vec / sqrt(vec.x * vec.x + vec.y * vec.y + vec.z * vec.z);
+	return vec / Magnitude(vec);
 }
+
+static const Dawn::Vec3 ACCEL_GRAVITY(0, -1, 0);
 
 struct Ball {
 	Dawn::Scene& scene;
@@ -29,6 +43,10 @@ struct Ball {
 		: scene(scene), entity(ent), velocity(0, 0, 0), mass(mass) {
 		//transform = scene.getComponent<Dawn::TransformComponent>(ent);
 	}
+    Dawn::Vec3 getPos() {
+        auto& transform = scene.getComponent<Dawn::TransformComponent>(entity);
+        return transform.position;
+    }
 	void tickGravity() {
 		auto& transform = scene.getComponent<Dawn::TransformComponent>(entity);
 		Dawn::Vec3& pos = transform.position;
@@ -38,19 +56,17 @@ struct Ball {
 		time_passed += d_time;
 		float wind;
 		{
-			float pi = 3.14159;
 			float freq = 0.2;
 			float amplitude = 0.5;
-			wind = amplitude * sin(pi * freq * time_passed);
+			wind = amplitude * sin(PI * freq * time_passed);
 		}
 		//std::cout << wind << std::endl;
-		Dawn::Vec3 acceleration(0, -1, 0);
 
 		Dawn::Vec3 d_velocity =
-			(acceleration * d_time);
+			(ACCEL_GRAVITY * d_time);
 
 		Dawn::Vec3 d_position =
-			(velocity * d_time) + (acceleration * 0.5 * d_time * d_time);
+			(velocity * d_time) + (ACCEL_GRAVITY * 0.5 * d_time * d_time);
 
 		velocity = velocity + d_velocity;
 		pos = pos + d_position;
@@ -63,6 +79,8 @@ struct Ball {
 		auto& transform = scene.getComponent<Dawn::TransformComponent>(entity);
 		Dawn::Vec3& pos = transform.position;
 
+        const float ELASTICITY = 1.0;
+        
 		// Bottom wall
 		if ((pos.y - (BALL_SIZE / 2)) <= BOTTOM) {
 			// Displacement
@@ -70,7 +88,7 @@ struct Ball {
 			Dawn::Vec3 n_displace = Norm(velocity) * -1;
 			Dawn::Vec3 displace(n_displace.x / n_displace.y * y_displace, y_displace, 0);
 			// Inelastic collision
-			Dawn::Vec3 bounce_velocity(velocity.x * 0.9, -velocity.y * 0.9, 0);
+			Dawn::Vec3 bounce_velocity(velocity.x * ELASTICITY, -velocity.y * ELASTICITY, 0);
 
 			// Update
 			pos = pos + displace;
@@ -87,7 +105,7 @@ struct Ball {
 			Dawn::Vec3 n_displace = Norm(velocity) * -1;
 			Dawn::Vec3 displace(x_displace, n_displace.y / n_displace.x * x_displace, 0);
 			// Inelastic collision
-			Dawn::Vec3 bounce_velocity(-velocity.x * 0.9, velocity.y * 0.9, 0);
+			Dawn::Vec3 bounce_velocity(-velocity.x * ELASTICITY, velocity.y * ELASTICITY, 0);
 
 			// Update
 			pos = pos + displace;
@@ -122,11 +140,12 @@ struct Ball {
 			total_acceleration = total_acceleration + (force_normal * accel_magnitude);
 
 			// Energy loss
+            /*
 			auto vel_normal = Normalize(velocity);
 			auto ball_vel_normal = Norm(ball.velocity);
 			float dot = Dawn::Dot(vel_normal, ball_vel_normal);
-			float energy_loss = (acos(dot) / 3.14159);
-			total_energy_loss *= energy_loss;
+			float energy_loss = sqrt((PI - acos(dot)) / PI);
+			total_energy_loss *= energy_loss;*/
 		}
 
 		return std::make_pair(total_acceleration, total_energy_loss);
@@ -150,14 +169,22 @@ class Game : public Dawn::Application {
 public:
 	Game() {
 		// No framerate limit
-		glfwSwapInterval(0);
+		glfwSwapInterval(1);
 
 		// Set window size
 		getWindow().setHeight(800);
 		getWindow().setWidth(800);
 
 		// Load texture
-		ball_texture.loadFromFile("Ball.png");
+        Dawn::Image image;
+        bool ok = image.loadFromFile("Ball.png");
+        if (!ok) {
+            std::cout << "failed to load Ball.png" << std::endl;
+            exit(1);
+        } else {
+            std::cout << "Loaded Ball.png" << std::endl;
+        }
+		ball_texture.loadFromImage(image);
 
 		// Set up balls
 		for (int y = 0; y < 5; y++) {
@@ -179,8 +206,8 @@ public:
 				sprite_component.color = BALL_COLORS[(x + y) % BALL_COLOR_COUNT];
 
 				Ball ball(scene, ball_entity, 1.0);
-				ball.velocity.x = 0.5f - (float)(rand() % 100) / 100.0f;
-				ball.mass = 0.2 * y;
+				ball.velocity.x = 2.0f - 4.0f*(float)(rand() % 100) / 100.0f;
+				//ball.mass = 0.2 + 0.2 * y;
 				balls.push_back(ball);
 			}
 		}
@@ -196,7 +223,24 @@ public:
 			return;
 		}
 
-		std::for_each(balls.begin(), balls.end(), std::mem_fn(&Ball::tickGravity));
+        // Stats
+        {
+            float total_momentum = 0.0;
+            float total_kinetic_energy = 0.0;
+            float total_potential_energy = 0.0;
+            for (auto& ball : balls) {
+                total_momentum += ball.mass * Magnitude(ball.velocity);
+                total_kinetic_energy +=
+                    0.5 * ball.mass * SqrMagnitude(ball.velocity);
+                total_potential_energy +=
+                      ball.mass
+                    * Magnitude(ACCEL_GRAVITY)
+                    * (ball.getPos().y + 1.0);
+                std::cout << std::fixed << std::setprecision(2) << "p: " << total_momentum << " | E: " << total_kinetic_energy + total_potential_energy << "\r" << std::flush;
+            }
+        }
+        
+        std::for_each(balls.begin(), balls.end(), std::mem_fn(&Ball::tickGravity));
 		std::for_each(balls.begin(), balls.end(), std::mem_fn(&Ball::collideWalls));
 		std::vector<std::pair<Dawn::Vec3, float>> modifications;
 		modifications.reserve(balls.size());
@@ -208,9 +252,10 @@ public:
 			float energy_loss = modifications[i].second;
 			// Apply accelerations
 			balls[i].velocity = acceleration * PHYSICS_TIMESTEP + balls[i].velocity;
+            //std::cout << energy_loss << std::endl;
 			// Apply energy loss
 			balls[i].velocity = balls[i].velocity * energy_loss;
-			std::cout << balls[i].velocity.x << balls[i].velocity.y << balls[i].velocity.z << std::endl;
+			//std::cout << balls[i].velocity.x << balls[i].velocity.y << balls[i].velocity.z << std::endl;
 		}
 
 		scene.onUpdate();
